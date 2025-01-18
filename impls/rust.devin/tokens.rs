@@ -26,6 +26,17 @@ pub enum Operator {
 
 impl Eq for Operator {}
 
+impl std::fmt::Display for Operator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Operator::Add => write!(f, "+"),
+            Operator::Sub => write!(f, "-"),
+            Operator::Mul => write!(f, "*"),
+            Operator::Div => write!(f, "/"),
+        }
+    }
+}
+
 impl TryFrom<char> for Operator {
     type Error = ();
     fn try_from(value: char) -> Result<Self, Self::Error> {
@@ -78,20 +89,23 @@ impl TryFrom<char> for Special {
 
 impl From<&str> for Token {
     fn from(value: &str) -> Self {
+        let Some(first_char) = value.chars().next() else {
+            return Token::Nonspecials(Rc::from(value));
+        };
         if value == "~@" {
             return Token::Tat;
         }
         if let Some(comment) = value.strip_prefix(";") {
             return Token::Comment(Rc::from(comment));
         }
-        if let Ok(special) = Special::try_from(value.chars().next().unwrap()) {
+        if let Ok(special) = Special::try_from(first_char) {
             return Token::Special(special);
         }
-        if let Ok(operator) = Operator::try_from(value.chars().next().unwrap()) {
+        if let Ok(operator) = Operator::try_from(first_char) {
             return Token::Operator(operator);
         }
         if let Some(stripped) = value.strip_prefix('"') {
-            let closed = value.ends_with('"');
+            let closed = stripped.ends_with('"');
             let end = if closed {
                 value.len() - 2
             } else {
@@ -112,23 +126,48 @@ pub enum Atom {
     Literal(Rc<str>),
 }
 
+impl std::fmt::Display for Atom {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Atom::Operator(op) => write!(f, "{}", op),
+            Atom::Literal(lit) => write!(f, "{}", lit),
+        }
+    }
+}
+
 pub enum Type {
     Atom(Atom),
     List(Rc<[Type]>),
 }
 
-pub struct Reader {
+impl std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Type::Atom(atom) => write!(f, "{}", atom),
+            Type::List(list) => {
+                let joined = list
+                    .iter()
+                    .map(|t| t.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                write!(f, "({})", joined)
+            }
+        }
+    }
+}
+
+pub struct Tokens {
     tokens: VecDeque<Token>,
 }
 
-impl Iterator for Reader {
+impl Iterator for Tokens {
     type Item = Token;
     fn next(&mut self) -> Option<Self::Item> {
         self.tokens.pop_front()
     }
 }
 
-impl Reader {
+impl Tokens {
     pub fn read_str(input: &str) -> Self {
         Self {
             tokens: Self::tokenize(input).into(),
@@ -141,10 +180,7 @@ impl Reader {
                 .unwrap();
         regex
             .captures_iter(input)
-            .map(|caps| {
-                dbg!(&caps);
-                caps.get(1).unwrap().as_str().into()
-            })
+            .map(|caps| caps.get(1).unwrap().as_str().into())
             .collect()
     }
 
@@ -153,12 +189,11 @@ impl Reader {
     }
 
     fn read_form(&mut self) -> Option<Type> {
-        Some(match self.peek()? {
-            Token::Special(Special::OpenParen) => {
-                self.next();
-                Type::List(self.read_list()?.into())
-            }
-            _ => Type::Atom(self.read_atom()?),
+        Some(if self.peek()? == &Token::Special(Special::OpenParen) {
+            self.next();
+            Type::List(self.read_list()?.into())
+        } else {
+            Type::Atom(self.read_atom()?)
         })
     }
 
@@ -175,14 +210,21 @@ impl Reader {
         match self.next()? {
             Token::Operator(operator) => Some(Atom::Operator(operator)),
             Token::Nonspecials(contents) => Some(Atom::Literal(contents.clone())),
-            Token::String { contents, .. } => {
-                Some(Atom::Literal(Rc::from(format!("\"{}\"", contents))))
-            }
+            Token::String { contents, closed } => Some(Atom::Literal(Rc::from(format!(
+                "\"{}{}{}",
+                contents,
+                if closed { "\"" } else { "" },
+                if closed { "" } else { "unbalanced" }
+            )))),
             Token::Tat | Token::Comment(_) => None,
             Token::Special(special) => match special {
                 Special::OpenParen | Special::CloseParen => unreachable!(),
                 _ => None,
             },
         }
+    }
+
+    pub fn pr_str(&mut self) -> Option<String> {
+        self.read_form().map(|t| t.to_string())
     }
 }

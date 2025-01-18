@@ -1,23 +1,22 @@
-mod reader;
+mod tokens;
 
-use anyhow::anyhow;
-use reader::Reader;
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
+use tokens::Tokens;
 
-fn read(input: String) -> String {
+fn read(input: String) -> Tokens {
+    Tokens::read_str(&input)
+}
+
+fn eval(input: Tokens) -> Tokens {
     input
 }
 
-fn eval(input: String) -> String {
-    input
+fn print(mut input: Tokens) -> Option<String> {
+    input.pr_str()
 }
 
-fn print(input: String) -> String {
-    input
-}
-
-fn rep(input: String) -> String {
+fn rep(input: String) -> Option<String> {
     print(eval(read(input)))
 }
 
@@ -29,11 +28,7 @@ fn main() -> anyhow::Result<()> {
         match readline {
             Ok(line) => {
                 rl.add_history_entry(line.as_str())?;
-                if line.starts_with("tokenize") {
-                    let string = &line[(line.find(' ').ok_or(anyhow!("no input"))?)..];
-                    println!("{:?}", Reader::read_str(string).collect::<Vec<_>>());
-                }
-                println!("{}", rep(line));
+                println!("{}", rep(line).unwrap_or("unbalanced".to_string()));
             }
             Err(ReadlineError::Interrupted | ReadlineError::Eof) => {
                 break;
